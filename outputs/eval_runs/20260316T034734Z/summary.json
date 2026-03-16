@@ -1,0 +1,21 @@
+{
+  "reward": 10,
+  "normal_correct": 0,
+  "hard_correct": 1,
+  "normal_total": 1,
+  "hard_total": 1,
+  "overall_accuracy": 0.5,
+  "normal_accuracy": 0.0,
+  "hard_accuracy": 1.0,
+  "format_validity_rate": 1.0,
+  "avg_latency_ms": 1.0,
+  "total_input_tokens": 0,
+  "total_output_tokens": 0,
+  "estimated_total_cost_usd": 0.0,
+  "model": "dry-run",
+  "dry_run": true,
+  "cheatsheet_original_bytes": 11268,
+  "cheatsheet_used_bytes": 10240,
+  "cheatsheet_clipped": true,
+  "reward_formula": "reward = normal_correct + 10 * hard_correct"
+}

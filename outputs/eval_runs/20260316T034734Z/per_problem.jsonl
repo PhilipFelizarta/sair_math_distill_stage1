@@ -1,0 +1,2 @@
+{"problem_id": "n1", "difficulty": "normal", "label_true": true, "predicted_verdict": "FALSE", "is_correct": false, "format_valid": true, "parse_errors": [], "latency_ms": 1.0, "input_tokens": 0, "output_tokens": 0, "estimated_cost_usd": 0.0, "model": "dry-run", "inference_error": null}
+{"problem_id": "h1", "difficulty": "hard", "label_true": false, "predicted_verdict": "FALSE", "is_correct": true, "format_valid": true, "parse_errors": [], "latency_ms": 1.0, "input_tokens": 0, "output_tokens": 0, "estimated_cost_usd": 0.0, "model": "dry-run", "inference_error": null}

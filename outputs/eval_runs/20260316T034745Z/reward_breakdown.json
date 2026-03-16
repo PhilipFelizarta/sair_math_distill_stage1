@@ -1,0 +1,6 @@
+{
+  "reward": 10,
+  "formula": "normal_correct + 10 * hard_correct",
+  "normal_term": 0,
+  "hard_term": 10
+}

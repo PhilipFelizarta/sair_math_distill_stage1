@@ -1,0 +1,2 @@
+﻿{"id":"n1","equation1":"x=x*y","equation2":"x=x*x","label":true}
+{"id":"n2","equation1":"x=y","equation2":"x=x","label":false}
