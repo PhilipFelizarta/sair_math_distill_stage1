@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from datetime import datetime, UTC
 import json
 from pathlib import Path
+import random
 import sys
 from typing import Any
 from urllib import request
@@ -34,6 +36,7 @@ def _evaluate_subset(
     cheatsheet: str,
     use_dry_run: bool,
     config: Any,
+    parallel_workers: int,
     max_items: int | None = None,
 ) -> tuple[int, list[dict[str, Any]], int, float, int, int, float]:
     correct = 0
@@ -47,7 +50,7 @@ def _evaluate_subset(
 
     iterable = problems if max_items is None else problems[:max_items]
 
-    for item in iterable:
+    def _evaluate_item(item: Problem) -> dict[str, Any]:
         prompt = build_prompt(item.equation1, item.equation2, cheatsheet)
         if use_dry_run:
             inf = run_dry_inference(item.equation1, item.equation2)
@@ -57,43 +60,46 @@ def _evaluate_subset(
         parsed = parse_response(inf.output_text)
         is_correct = parsed.verdict is not None and ((parsed.verdict == "TRUE") == item.label_true)
 
-        if is_correct:
+        return {
+            "problem_id": item.problem_id,
+            "difficulty": item.difficulty,
+            "label_true": item.label_true,
+            "predicted_verdict": parsed.verdict,
+            "is_correct": is_correct,
+            "format_valid": parsed.valid,
+            "parse_errors": parsed.errors,
+            "latency_ms": inf.latency_ms,
+            "input_tokens": inf.input_tokens,
+            "output_tokens": inf.output_tokens,
+            "estimated_cost_usd": _estimate_cost_usd(
+                inf.input_tokens,
+                inf.output_tokens,
+                config.input_cost_per_1m_tokens,
+                config.output_cost_per_1m_tokens,
+            ),
+            "model": inf.model,
+            "inference_error": inf.error,
+        }
+
+    worker_count = max(1, int(parallel_workers))
+    items = list(iterable)
+
+    if worker_count == 1 or len(items) <= 1:
+        rows = [_evaluate_item(item) for item in items]
+    else:
+        with ThreadPoolExecutor(max_workers=min(worker_count, len(items))) as executor:
+            rows = list(executor.map(_evaluate_item, items))
+
+    for row in rows:
+        if row["is_correct"]:
             correct += 1
-        if parsed.valid:
+        if row["format_valid"]:
             valid_count += 1
-
-        total_latency += inf.latency_ms
-        total_input_tokens += inf.input_tokens
-        total_output_tokens += inf.output_tokens
-        total_cost += _estimate_cost_usd(
-            inf.input_tokens,
-            inf.output_tokens,
-            config.input_cost_per_1m_tokens,
-            config.output_cost_per_1m_tokens,
-        )
-
-        per_problem.append(
-            {
-                "problem_id": item.problem_id,
-                "difficulty": item.difficulty,
-                "label_true": item.label_true,
-                "predicted_verdict": parsed.verdict,
-                "is_correct": is_correct,
-                "format_valid": parsed.valid,
-                "parse_errors": parsed.errors,
-                "latency_ms": inf.latency_ms,
-                "input_tokens": inf.input_tokens,
-                "output_tokens": inf.output_tokens,
-                "estimated_cost_usd": _estimate_cost_usd(
-                    inf.input_tokens,
-                    inf.output_tokens,
-                    config.input_cost_per_1m_tokens,
-                    config.output_cost_per_1m_tokens,
-                ),
-                "model": inf.model,
-                "inference_error": inf.error,
-            }
-        )
+        total_latency += row["latency_ms"]
+        total_input_tokens += row["input_tokens"]
+        total_output_tokens += row["output_tokens"]
+        total_cost += row["estimated_cost_usd"]
+        per_problem.append(row)
 
     return (
         correct,
@@ -147,6 +153,17 @@ def _command_evaluate_cheatsheet(args: argparse.Namespace) -> int:
     if args.dry_run:
         config = config.__class__(**{**asdict(config), "dry_run": True})
 
+    if args.parallel_workers <= 0:
+        raise ValueError("--parallel-workers must be >= 1")
+    if args.sample_normal is not None and args.sample_normal < 0:
+        raise ValueError("--sample-normal must be >= 0")
+    if args.sample_hard is not None and args.sample_hard < 0:
+        raise ValueError("--sample-hard must be >= 0")
+    if args.limit_normal is not None and args.limit_normal < 0:
+        raise ValueError("--limit-normal must be >= 0")
+    if args.limit_hard is not None and args.limit_hard < 0:
+        raise ValueError("--limit-hard must be >= 0")
+
     validate_runtime_requirements(config)
 
     cheatsheet_path = Path(args.file)
@@ -158,18 +175,32 @@ def _command_evaluate_cheatsheet(args: argparse.Namespace) -> int:
 
     normal, hard = load_stage1(config.normal_path, config.hard_path)
 
+    rng = random.Random(args.sample_seed)
+    sampled_normal = (
+        rng.sample(normal, k=min(args.sample_normal, len(normal)))
+        if args.sample_normal is not None
+        else normal
+    )
+    sampled_hard = (
+        rng.sample(hard, k=min(args.sample_hard, len(hard)))
+        if args.sample_hard is not None
+        else hard
+    )
+
     normal_correct, normal_rows, normal_valid, normal_latency, normal_in, normal_out, normal_cost = _evaluate_subset(
-        normal,
+        sampled_normal,
         cheatsheet,
         config.dry_run,
         config,
+        parallel_workers=args.parallel_workers,
         max_items=args.limit_normal,
     )
     hard_correct, hard_rows, hard_valid, hard_latency, hard_in, hard_out, hard_cost = _evaluate_subset(
-        hard,
+        sampled_hard,
         cheatsheet,
         config.dry_run,
         config,
+        parallel_workers=args.parallel_workers,
         max_items=args.limit_hard,
     )
 
@@ -216,6 +247,10 @@ def _command_evaluate_cheatsheet(args: argparse.Namespace) -> int:
         "cheatsheet_used_bytes": used_bytes,
         "cheatsheet_clipped": clipped,
         "reward_formula": "reward = normal_correct + 10 * hard_correct",
+        "parallel_workers": args.parallel_workers,
+        "sample_normal": args.sample_normal,
+        "sample_hard": args.sample_hard,
+        "sample_seed": args.sample_seed,
     }
 
     _write_json(output_dir / "summary.json", summary)
@@ -251,6 +286,10 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--hard-path", default=None, help="Override path to hard.jsonl")
     evaluate.add_argument("--limit-normal", type=int, default=None, help="Evaluate only first N normal problems")
     evaluate.add_argument("--limit-hard", type=int, default=None, help="Evaluate only first N hard problems")
+    evaluate.add_argument("--sample-normal", type=int, default=None, help="Randomly sample N normal problems")
+    evaluate.add_argument("--sample-hard", type=int, default=None, help="Randomly sample N hard problems")
+    evaluate.add_argument("--sample-seed", type=int, default=42, help="Random seed for sampling")
+    evaluate.add_argument("--parallel-workers", type=int, default=8, help="Number of parallel workers for inference")
     evaluate.add_argument("--model", default=None, help="Override model name")
     evaluate.add_argument("--dry-run", action="store_true", help="Run without API calls")
     evaluate.add_argument("--output-dir", default=None, help="Override output directory")

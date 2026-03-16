@@ -1,3 +1,6 @@
 env/
 .env
 .plans/
+data/
+outputs/
+*/__pycache__/*
