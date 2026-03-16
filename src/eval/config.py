@@ -50,7 +50,7 @@ def load_config(root_dir: Path) -> EvaluatorConfig:
     _load_env_file(root_dir / ".env")
 
     api_key = os.getenv("CHATGPT_KEY", "").strip()
-    model = os.getenv("EVAL_MODEL", "gpt-4.1-mini").strip()
+    model = os.getenv("EVAL_MODEL", "gpt-4.1-nano").strip()
 
     return EvaluatorConfig(
         api_key=api_key,
